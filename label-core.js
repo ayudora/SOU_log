@@ -4,6 +4,7 @@ const PAPER_PROFILES = Object.freeze({
   "a4-business-10": Object.freeze({
     id: "a4-business-10",
     name: "A4 名刺サイズラベル 10面（91×55mm）",
+    note: "A-one F10A4-1対応／2列×5段",
     sheetWidth: 210,
     sheetHeight: 297,
     width: 91,
@@ -19,35 +20,27 @@ const PAPER_PROFILES = Object.freeze({
 const DEFAULT_PAPER = "a4-business-10";
 const LabelCore = {
   profile: (id) => PAPER_PROFILES[id],
-  count: (p) => p.columns * p.rows,
+  count: (p) => p.positions ? p.positions.length : p.columns * p.rows,
   geometry(p, cal, index) {
     const scale = cal.scale / 100;
     return {
-      left: p.left + cal.x + (index % p.columns) * (p.width + p.gapX) * scale,
+      left: cal.x + (p.positions ? p.positions[0].left + (p.positions[index].left - p.positions[0].left) * scale : p.left) + (p.positions ? 0 : (index % p.columns) * (p.width + p.gapX) * scale),
       top:
-        p.top +
-        cal.y +
-        Math.floor(index / p.columns) * (p.height + p.gapY) * scale,
+        cal.y + (p.positions ? p.positions[0].top + (p.positions[index].top - p.positions[0].top) * scale : p.top + Math.floor(index / p.columns) * (p.height + p.gapY) * scale),
       width: p.width * scale,
       height: p.height * scale,
     };
   },
   inBounds(p, cal) {
-    const first = this.geometry(p, cal, 0),
-      last = this.geometry(p, cal, this.count(p) - 1);
-    return (
-      first.left >= 0 &&
-      first.top >= 0 &&
-      last.left + last.width <= p.sheetWidth &&
-      last.top + last.height <= p.sheetHeight
-    );
+    return Array.from({length:this.count(p)},(_,i)=>this.geometry(p,cal,i)).every(g=>
+      g.left>=0 && g.top>=0 && g.left+g.width<=p.sheetWidth && g.top+g.height<=p.sheetHeight);
   },
   nextSlot(slots, blocked) {
     return slots.findIndex((id, i) => id === null && !blocked[i]);
   },
-  selectedIndices(s) {
+  printableIndices(s) {
     return s.slots.flatMap((id, i) =>
-      id && !s.blocked[i] && s.selected[i] ? [i] : [],
+      id && !s.blocked[i] && !(s.logs||[]).find(log=>log.id===id)?.needsReview ? [i] : [],
     );
   },
   wrap(ctx, text, width) {
@@ -82,27 +75,11 @@ const LabelCore = {
 
     // 横向きシール：左に3:4の写真、右に文字
     const sideBySide = !portrait && Boolean(image);
-    const photoHeight = h - 6;
+    const photoHeight = Math.min(h - 6, (w - 10) * 0.48 * 4 / 3);
     const photoWidth = (photoHeight * 3) / 4;
     const textX = sideBySide ? 3 + photoWidth + 4 : 3;
     const textWidth = w - textX - 3;
-    // 縦向きでは、写真の下から文字を配置
-    const dateY = portrait && image ? 3 + (w - 6) / 1.5 + 3 : 3.5;
-    const titleY = dateY + 5.5;
-
-    // 日付
-    ctx.fillStyle = "#647266";
-    ctx.font = "2.6px sans-serif";
-    ctx.fillText(record.date.replaceAll("-", " / "), textX, dateY);
-    // タイトル
-    ctx.fillStyle = "#26352e";
-    ctx.font = "bold 3.6px sans-serif";
-    const titleLines = this.wrap(ctx, record.title, textWidth);
-    titleLines.slice(0, 2).forEach((line, i) => {
-      ctx.fillText(line, textX, titleY + i * 4.4);
-    });
-
-    let memoY = 22;
+    let textY = portrait && image ? 3 + (w - 6) / 1.5 + 3 : 3.5;
 
     // 写真
     if (image) {
@@ -130,18 +107,29 @@ const LabelCore = {
         box.h,
       );
 
-      if (portrait) memoY = titleY + 13;
+
     }
 
-    // メモ
-    ctx.font = "3px sans-serif";
-    const lines = this.wrap(ctx, record.memo, textWidth);
-    const max = Math.floor((h - 3 - memoY) / 4.2);
-    lines.slice(0, max).forEach((line, i) => {
-      ctx.fillText(line, textX, memoY + i * 4.2);
-    });
+    // Only occupied fields consume space. The photo geometry remains unchanged.
+    if (record.date) {
+      ctx.fillStyle = "#647266";
+      ctx.font = "2.6px sans-serif";
+      ctx.fillText(record.date.replaceAll("-", " / "), textX, textY);
+      textY += 5.5;
+    }
+    ctx.fillStyle = "#26352e";
+    ctx.font = "bold 3.6px sans-serif";
+    const title = record.title.trim();
+    const titleLines = title ? this.wrap(ctx, title, textWidth) : [];
+    titleLines.slice(0, 2).forEach((line, i) => ctx.fillText(line, textX, textY + i * 4.4));
+    if (titleLines.length) textY += Math.min(titleLines.length, 2) * 4.4 + 2;
 
-    return titleLines.length <= 2 && lines.length <= max;
+    ctx.font = "3px sans-serif";
+    const memo = record.memo.trim();
+    const lines = memo ? this.wrap(ctx, memo, textWidth) : [];
+    const max = Math.max(0, Math.floor((h - 3 - textY) / 4.2));
+    lines.slice(0, max).forEach((line, i) => ctx.fillText(line, textX, textY + i * 4.2));
+    return textWidth > 0 && titleLines.length <= 2 && lines.length <= max;
   },
   physicalCanvas(source, orientation, createCanvas) {
     if (orientation !== "portrait") return source;

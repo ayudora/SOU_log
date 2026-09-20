@@ -10,7 +10,7 @@ assert.equal(C.inBounds(p,{x:14,y:11,scale:102}),false);
 assert.equal(C.geometry(p,{x:.5,y:-.5,scale:100},1).left,105.5);
 assert.equal(C.nextSlot([null,null,null],[true,true,false]),2);
 assert.equal(C.nextSlot(['a',null],[false,true]),-1);
-assert.deepEqual(C.selectedIndices({slots:['a','b','c',null],blocked:[false,true,false,false],selected:[true,true,false,true]}),[0]);
+assert.deepEqual(C.printableIndices({slots:['a','b','c',null],blocked:[false,true,false,false],selected:[true,true,false,true]}),[0,2]);
 const calls=[];
 function canvas(){let font='3px sans-serif';const ctx={scale(){},fillRect(){},drawImage(...args){calls.push(['draw',...args]);},fillText(){},translate(...v){calls.push(['translate',...v]);},rotate(v){calls.push(['rotate',v]);},measureText:s=>({width:Array.from(s).length*parseFloat(font.replace('bold ',''))}),get font(){return font},set font(v){font=v}};return {getContext:()=>ctx,toDataURL:()=> 'data:image/png;base64,AAAA'};}
 const rec={date:'2026-09-19',title:'試作02',memo:'あ'.repeat(80),orientation:'landscape',photo:null,x:50,y:50};
@@ -26,6 +26,6 @@ assert.equal(run("state.draft.date='';validateState(state).version"),2);
 assert.throws(()=>run("validateState({...state,slots:Array(20).fill(null)})"));
 assert.throws(()=>run("validateState({...state,slots:['unknown',...Array(9).fill(null)]})"));
 run('preparePrint(true)');assert.equal(nodes.get('printRoot').children.length,11);assert.equal(nodes.get('printRoot').children[9].style.cssText,'left:105mm;top:231mm;width:91mm;height:55mm');
-run("state.logs=[{id:'t',printSticker:'data:image/png;base64,AAAA'}];state.slots[0]='t';state.slots[8]='t';state.slots[9]='t';state.selected[0]=false;state.blocked[8]=true;preparePrint(false)");
-assert.equal(nodes.get('printRoot').children.length,1);assert.equal(nodes.get('printRoot').children[0].style.cssText,'left:105mm;top:231mm;width:91mm;height:55mm');
+run("state.logs=[{id:'t',printSticker:'data:image/png;base64,AAAA'}];state.slots[0]='t';state.slots[8]='t';state.slots[9]='t';state.blocked[8]=true;preparePrint(false)");
+assert.equal(nodes.get('printRoot').children.length,2);assert.equal(nodes.get('printRoot').children[1].style.cssText,'left:105mm;top:231mm;width:91mm;height:55mm');
 (async()=>{const migrated=await run("migrate({version:1,logs:Array.from({length:15},(_,i)=>({id:String(i),date:'2026-09-19',memo:'old '+i,photo:null,x:50,y:50,sticker:'data:image/png;base64,AAAA'})),slots:Array(20).fill(null),cal:{x:1.2,y:3,scale:101},draft:{id:null,date:'',memo:'draft',photo:null,x:50,y:50}})");assert.equal(migrated.logs.length,15);assert.equal(migrated.logs[14].memo,'old 14');assert.equal(migrated.slots.length,10);assert.ok(migrated.slots.every(v=>v===null));assert.equal(migrated.cal.x,0);assert.equal(migrated.draft.memo,'draft');console.log('PASS: geometry, used/selected slots, portrait rotation, text fit, print output, backup validation, 15-log legacy migration.');})().catch(e=>{console.error(e);process.exitCode=1;});
