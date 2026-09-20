@@ -1,0 +1,31 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const {LabelCore:C,PAPER_PROFILES,DEFAULT_PAPER}=require('./label-core.js');
+const p=PAPER_PROFILES[DEFAULT_PAPER],cal={x:0,y:0,scale:100};
+assert.equal(C.count(p),10);
+assert.deepEqual(C.geometry(p,cal,0),{left:14,top:11,width:91,height:55});
+assert.deepEqual(C.geometry(p,cal,9),{left:105,top:231,width:91,height:55});
+assert.equal(C.inBounds(p,cal),true);
+assert.equal(C.inBounds(p,{x:14,y:11,scale:100}),true);
+assert.equal(C.inBounds(p,{x:14,y:11,scale:102}),false);
+assert.equal(C.geometry(p,{x:.5,y:-.5,scale:100},1).left,105.5);
+assert.equal(C.nextSlot([null,null,null],[true,true,false]),2);
+assert.equal(C.nextSlot(['a',null],[false,true]),-1);
+assert.deepEqual(C.selectedIndices({slots:['a','b','c',null],blocked:[false,true,false,false],selected:[true,true,false,true]}),[0]);
+const calls=[];
+function canvas(){let font='3px sans-serif';const ctx={scale(){},fillRect(){},drawImage(...args){calls.push(['draw',...args]);},fillText(){},translate(...v){calls.push(['translate',...v]);},rotate(v){calls.push(['rotate',v]);},measureText:s=>({width:Array.from(s).length*parseFloat(font.replace('bold ',''))}),get font(){return font},set font(v){font=v}};return {getContext:()=>ctx,toDataURL:()=> 'data:image/png;base64,AAAA'};}
+const rec={date:'2026-09-19',title:'試作02',memo:'あ'.repeat(80),orientation:'landscape',photo:null,x:50,y:50};
+let label=canvas();assert.equal(C.render(label,rec,{width:1200,height:800}),true);assert.equal(label.width,1092);assert.equal(label.height,660);
+rec.orientation='portrait';assert.equal(C.render(label,rec,{width:1200,height:800}),true);assert.equal(label.width,660);assert.equal(label.height,1092);
+const printed=C.physicalCanvas(label,'portrait',canvas);assert.equal(printed.width,1092);assert.equal(printed.height,660);assert.ok(calls.some(v=>v[0]==='rotate'&&v[1]===Math.PI/2));
+assert.equal(C.render(label,{...rec,memo:'a\n'.repeat(30)},null),false);
+const nodes=new Map();function node(){return {...canvas(),value:'0',checkValidity:()=>true,style:{},children:[],append(...v){this.children.push(...v);},replaceChildren(){this.children=[];}};}
+const context=vm.createContext({LabelCore:C,DEFAULT_PAPER,console,Date,Set,Promise,structuredClone,clearTimeout,setTimeout,window:{addEventListener(){}},document:{getElementById:id=>{if(!nodes.has(id))nodes.set(id,node());return nodes.get(id)},createElement:()=>node()}});
+vm.runInContext(fs.readFileSync(__dirname+'/app.js','utf8').split("document.querySelectorAll('[data-view]').forEach(b=>")[0],context);
+const run=s=>vm.runInContext(s,context);
+assert.equal(run("state.draft.date='';validateState(state).version"),2);
+assert.throws(()=>run("validateState({...state,slots:Array(20).fill(null)})"));
+assert.throws(()=>run("validateState({...state,slots:['unknown',...Array(9).fill(null)]})"));
+run('preparePrint(true)');assert.equal(nodes.get('printRoot').children.length,11);assert.equal(nodes.get('printRoot').children[9].style.cssText,'left:105mm;top:231mm;width:91mm;height:55mm');
+run("state.logs=[{id:'t',printSticker:'data:image/png;base64,AAAA'}];state.slots[0]='t';state.slots[8]='t';state.slots[9]='t';state.selected[0]=false;state.blocked[8]=true;preparePrint(false)");
+assert.equal(nodes.get('printRoot').children.length,1);assert.equal(nodes.get('printRoot').children[0].style.cssText,'left:105mm;top:231mm;width:91mm;height:55mm');
+(async()=>{const migrated=await run("migrate({version:1,logs:Array.from({length:15},(_,i)=>({id:String(i),date:'2026-09-19',memo:'old '+i,photo:null,x:50,y:50,sticker:'data:image/png;base64,AAAA'})),slots:Array(20).fill(null),cal:{x:1.2,y:3,scale:101},draft:{id:null,date:'',memo:'draft',photo:null,x:50,y:50}})");assert.equal(migrated.logs.length,15);assert.equal(migrated.logs[14].memo,'old 14');assert.equal(migrated.slots.length,10);assert.ok(migrated.slots.every(v=>v===null));assert.equal(migrated.cal.x,0);assert.equal(migrated.draft.memo,'draft');console.log('PASS: geometry, used/selected slots, portrait rotation, text fit, print output, backup validation, 15-log legacy migration.');})().catch(e=>{console.error(e);process.exitCode=1;});
